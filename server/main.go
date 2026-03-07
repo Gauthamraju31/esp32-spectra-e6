@@ -22,28 +22,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize image provider
-	var prov provider.ImageProvider
+	// Initialize image providers
+	providers := map[string]provider.ImageProvider{
+		"stub": provider.NewStubProvider(cfg.DisplayWidth, cfg.DisplayHeight),
+	}
+
+	if cfg.RunwareAPIKey != "" {
+		providers["runware"] = provider.NewRunwareProvider(cfg.RunwareAPIKey, cfg.RunwareModelID)
+		log.Printf("   Enabled Provider: Runware AI (Model: %s)", cfg.RunwareModelID)
+	}
+
+	// Legacy single providers mapping structure (kept for backward compatibility, optionally removable later)
 	switch cfg.ImageProvider {
 	case "openai":
-		if cfg.OpenAIAPIKey == "" {
-			fmt.Fprintln(os.Stderr, "OPENAI_API_KEY is required when IMAGE_PROVIDER=openai")
-			os.Exit(1)
+		if cfg.OpenAIAPIKey != "" {
+			providers["openai"] = provider.NewOpenAIProvider(cfg.OpenAIAPIKey)
+			log.Printf("   Enabled Provider: OpenAI")
 		}
-		prov = provider.NewOpenAIProvider(cfg.OpenAIAPIKey)
 	case "nanobanana":
-		if cfg.NanoBananaAPIKey == "" {
-			fmt.Fprintln(os.Stderr, "NANOBANANA_API_KEY is required when IMAGE_PROVIDER=nanobanana")
-			os.Exit(1)
+		if cfg.NanoBananaAPIKey != "" {
+			providers["nanobanana"] = provider.NewNanoBananaProvider(cfg.NanoBananaAPIKey, cfg.NanoBananaURL)
+			log.Printf("   Enabled Provider: NanoBanana")
 		}
-		prov = provider.NewNanoBananaProvider(cfg.NanoBananaAPIKey, cfg.NanoBananaURL)
-	default:
-		prov = provider.NewStubProvider(cfg.DisplayWidth, cfg.DisplayHeight)
 	}
 
 	// Initialize components
 	authMgr := auth.NewManager(cfg.Password)
-	limiter := ratelimit.NewLimiter(cfg.DailyRateLimit)
+	limiterFile := fmt.Sprintf("%s/ratelimit.json", cfg.DataDir)
+	limiter := ratelimit.NewLimiter(cfg.DailyRateLimit, limiterFile)
 	ditherer := dither.NewDitherer(cfg.DitherServiceURL, cfg.DitherMode, cfg.DisplayWidth, cfg.DisplayHeight)
 
 	var imgStore store.ImageStore
@@ -65,7 +71,7 @@ func main() {
 
 	// Initialize handlers
 	imgHandler := handler.NewImageHandler(imgStore)
-	promptHandler := handler.NewPromptHandler(authMgr, limiter, prov, ditherer, imgStore, cfg.DisplayWidth, cfg.DisplayHeight, cfg.CdnDomain)
+	promptHandler := handler.NewPromptHandler(authMgr, limiter, providers, ditherer, imgStore, cfg.DisplayWidth, cfg.DisplayHeight, cfg.CdnDomain)
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -87,7 +93,6 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("🖼  E-Paper Studio starting on http://localhost%s", addr)
-	log.Printf("   Provider: %s", prov.Name())
 	log.Printf("   Dither mode: %s", cfg.DitherMode)
 	log.Printf("   Display: %dx%d", cfg.DisplayWidth, cfg.DisplayHeight)
 	log.Printf("   Rate limit: %d/day", cfg.DailyRateLimit)

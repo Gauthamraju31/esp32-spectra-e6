@@ -18,18 +18,18 @@ func NewStubProvider(width, height int) *StubProvider {
 	return &StubProvider{width: width, height: height}
 }
 
-func (s *StubProvider) Name() string {
+func (p *StubProvider) Name() string {
 	return "Stub (Picsum Photos)"
 }
 
-func (s *StubProvider) Generate(ctx context.Context, prompt string) ([]byte, string, error) {
+func (p *StubProvider) Generate(ctx context.Context, prompt string) ([]byte, string, error) {
 	// Use dimensions from context if provided (accounts for orientation),
 	// otherwise fall back to the configured display dimensions.
-	w, h := s.width, s.height
-	if dims, ok := GetImageDims(ctx); ok {
-		w, h = dims.Width, dims.Height
+	width, height := p.width, p.height
+	if dims, ok := ctx.Value(ImageDimsKey{}).(ImageDims); ok {
+		width, height = dims.Width, dims.Height
 	}
-	url := fmt.Sprintf("https://picsum.photos/%d/%d", w, h)
+	url := fmt.Sprintf("https://picsum.photos/%d/%d", width, height)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

@@ -17,7 +17,8 @@ type ImageProvider interface {
 // contextKey is an unexported type for context keys in this package.
 type contextKey struct{ name string }
 
-var imageDimsKey = &contextKey{"image-dims"}
+// ImageDimsKey is the context key for desired image dimensions.
+type ImageDimsKey struct{}
 
 // ImageDims holds desired image dimensions.
 type ImageDims struct {
@@ -27,11 +28,11 @@ type ImageDims struct {
 
 // WithImageDims returns a context with the desired image dimensions attached.
 func WithImageDims(ctx context.Context, width, height int) context.Context {
-	return context.WithValue(ctx, imageDimsKey, ImageDims{Width: width, Height: height})
+	return context.WithValue(ctx, ImageDimsKey{}, ImageDims{Width: width, Height: height})
 }
 
 // GetImageDims retrieves image dimensions from the context, if present.
 func GetImageDims(ctx context.Context) (ImageDims, bool) {
-	dims, ok := ctx.Value(imageDimsKey).(ImageDims)
+	dims, ok := ctx.Value(ImageDimsKey{}).(ImageDims)
 	return dims, ok
 }

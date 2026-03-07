@@ -25,6 +25,8 @@ type Config struct {
 	S3SecretKey      string
 	S3BucketName     string
 	CdnDomain        string
+	RunwareAPIKey    string
+	RunwareModelID   string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -47,6 +49,8 @@ func Load() (*Config, error) {
 		S3SecretKey:      getEnv("S3_SECRET_KEY", ""),
 		S3BucketName:     getEnv("S3_BUCKET_NAME", ""),
 		CdnDomain:        getEnv("CDN_DOMAIN", ""),
+		RunwareAPIKey:    getEnv("RUNWARE_API_KEY", ""),
+		RunwareModelID:   getEnv("RUNWARE_MODEL_ID", "runware:101@1"),
 	}
 
 	if cfg.Password == "" {

@@ -21,7 +21,7 @@ import (
 type PromptHandler struct {
 	auth          *auth.Manager
 	limiter       *ratelimit.Limiter
-	provider      provider.ImageProvider
+	providers     map[string]provider.ImageProvider
 	ditherer      *dither.Ditherer
 	store         store.ImageStore
 	templates     *template.Template
@@ -34,7 +34,7 @@ type PromptHandler struct {
 func NewPromptHandler(
 	authMgr *auth.Manager,
 	limiter *ratelimit.Limiter,
-	prov provider.ImageProvider,
+	providers map[string]provider.ImageProvider,
 	d *dither.Ditherer,
 	s store.ImageStore,
 	displayWidth, displayHeight int,
@@ -44,7 +44,7 @@ func NewPromptHandler(
 	return &PromptHandler{
 		auth:          authMgr,
 		limiter:       limiter,
-		provider:      prov,
+		providers:     providers,
 		ditherer:      d,
 		store:         s,
 		templates:     tmpl,
@@ -59,20 +59,22 @@ type loginData struct {
 }
 
 type promptData struct {
-	ProviderName  string
-	Remaining     int
+	ProviderName      string
+	Remaining         int
 	Limit             int
 	HasImage          bool
 	UpdatedAt         string
 	HasFirmware       bool
 	FirmwareUpdatedAt string
 	Success           string
-	Error         string
-	Prompt        string
-	Orientation   string
-	DisplayWidth  int
-	DisplayHeight int
-	CdnDomain     string
+	Error             string
+	Prompt            string
+	Orientation       string
+	DisplayWidth      int
+	DisplayHeight     int
+	CdnDomain         string
+	Providers         []string
+	SelectedProvider  string
 }
 
 // HandleLogin renders the login page.
@@ -120,16 +122,23 @@ func (h *PromptHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 
 // HandlePrompt renders the prompt page and handles image generation.
 func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
+	// Extract available provider names for the dropdown
+	var availableProviders []string
+	for k := range h.providers {
+		availableProviders = append(availableProviders, k)
+	}
+
 	data := promptData{
-		ProviderName:  h.provider.Name(),
-		Remaining:     h.limiter.Remaining(),
-		Limit:         h.limiter.Limit(),
-		HasImage:      h.store.HasImage(),
-		HasFirmware:   h.store.HasFirmware(),
-		Orientation:   "landscape",
-		DisplayWidth:  h.displayWidth,
-		DisplayHeight: h.displayHeight,
-		CdnDomain:     h.cdnDomain,
+		Remaining:        h.limiter.Remaining(),
+		Limit:            h.limiter.Limit(),
+		HasImage:         h.store.HasImage(),
+		HasFirmware:      h.store.HasFirmware(),
+		Orientation:      "landscape",
+		DisplayWidth:     h.displayWidth,
+		DisplayHeight:    h.displayHeight,
+		CdnDomain:        h.cdnDomain,
+		Providers:        availableProviders,
+		SelectedProvider: "stub", // Default fallback
 	}
 
 	if h.store.HasImage() {
@@ -164,12 +173,25 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 	// POST — generate image
 	prompt := strings.TrimSpace(r.FormValue("prompt"))
 	orientation := r.FormValue("orientation")
+	providerID := r.FormValue("provider")
+	if providerID == "" {
+		providerID = "stub"
+	}
+
+	activeProvider, ok := h.providers[providerID]
+	if !ok {
+		data.Error = "Invalid image provider selected."
+		h.templates.ExecuteTemplate(w, "prompt", data)
+		return
+	}
+
 	data.Prompt = prompt
+	data.SelectedProvider = providerID
 	if orientation == "portrait" {
 		data.Orientation = "portrait"
 	}
 
-	if prompt == "" {
+	if prompt == "" && providerID != "stub" {
 		data.Error = "Please enter a prompt."
 		h.templates.ExecuteTemplate(w, "prompt", data)
 		return
@@ -183,7 +205,7 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate image
-	log.Printf("Generating image with %s: %q", h.provider.Name(), prompt)
+	log.Printf("Generating image with %s: %q", activeProvider.Name(), prompt)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
@@ -195,7 +217,7 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx = provider.WithImageDims(ctx, imgW, imgH)
 
-	imgData, contentType, err := h.provider.Generate(ctx, prompt)
+	imgData, contentType, err := activeProvider.Generate(ctx, prompt)
 	if err != nil {
 		data.Error = fmt.Sprintf("Image generation failed: %v", err)
 		data.Remaining = h.limiter.Remaining()
@@ -794,6 +816,31 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
+        .sample-prompts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .sample-bubble {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #a1a1aa;
+            font-size: 0.75rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .sample-bubble:hover {
+            background: rgba(99, 102, 241, 0.15);
+            color: #e4e4e7;
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
         @media (max-width: 640px) {
             .main { padding: 1rem; }
             .header { padding: 0.75rem 1rem; }
@@ -825,7 +872,13 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
         <div class="card">
             <div class="card-title">Generate Image</div>
             <form method="POST" action="/prompt" id="promptForm">
-                <textarea class="prompt-area" name="prompt" placeholder="Describe the image you want to generate for your e-paper display..." required>{{.Prompt}}</textarea>
+                <textarea class="prompt-area" id="promptArea" name="prompt" placeholder="Describe the image you want to generate for your e-paper display..." required>{{.Prompt}}</textarea>
+                <div class="sample-prompts" id="samplePrompts">
+                    <span class="sample-bubble">A vintage botanical illustration of a mystical blue rose glowing softly, detailed ink and watercolor</span>
+                    <span class="sample-bubble">A highly detailed macro photograph of morning dew on a spider web, soft sunlight in the background</span>
+                    <span class="sample-bubble">A neon lit cyberpunk ramen shop in the pouring rain, cinematic lighting, photorealistic 8k</span>
+                    <span class="sample-bubble">Oil painting of a cozy library with a crackling fireplace and a sleeping cat, warm lighting</span>
+                </div>
                 <div class="orientation-row">
                     <label class="orientation-label">Orientation</label>
                     <div class="orientation-toggle">
@@ -842,7 +895,14 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
                     </div>
                 </div>
                 <div class="prompt-footer">
-                    <span class="provider-info">Provider: <span class="provider-name">{{.ProviderName}}</span></span>
+                    <div class="provider-info" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="providerSelect" style="font-weight: 500; font-size: 0.8rem; color: #a1a1aa;">Provider</label>
+                        <select name="provider" id="providerSelect" style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; color: #e4e4e7; padding: 0.35rem; font-size: 0.85rem; outline: none; transition: border-color 0.2s;">
+                            {{range .Providers}}
+                            <option value="{{.}}" {{if eq . $.SelectedProvider}}selected{{end}}>{{if eq . "stub"}}Random Image{{else}}{{if eq . "runware"}}Runware AI{{else}}{{.}}{{end}}{{end}}</option>
+                            {{end}}
+                        </select>
+                    </div>
                     <button type="submit" class="btn" id="generateBtn" {{if eq .Remaining 0}}disabled{{end}}>
                         <span class="btn-text">✨ Generate</span>
                         <span class="spinner"></span>
@@ -917,10 +977,54 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
     </main>
 
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const providerSelect = document.getElementById('providerSelect');
+            const promptArea = document.getElementById('promptArea');
+            const samplePrompts = document.getElementById('samplePrompts');
+            
+            function updatePromptState() {
+                if (!providerSelect || !promptArea) return;
+                
+                if (providerSelect.value === 'stub') {
+                    promptArea.disabled = true;
+                    promptArea.style.opacity = '0.5';
+                    promptArea.style.cursor = 'not-allowed';
+                    promptArea.placeholder = 'Random Image provider selected. Prompt is ignored.';
+                    promptArea.required = false;
+                    if (samplePrompts) samplePrompts.style.display = 'none';
+                } else {
+                    promptArea.disabled = false;
+                    promptArea.style.opacity = '1';
+                    promptArea.style.cursor = 'text';
+                    promptArea.placeholder = 'Describe the image you want to generate for your e-paper display...';
+                    promptArea.required = true;
+                    if (samplePrompts) samplePrompts.style.display = 'flex';
+                }
+            }
+
+            if (providerSelect) {
+                providerSelect.addEventListener('change', updatePromptState);
+                updatePromptState();
+            }
+
+            document.querySelectorAll('.sample-bubble').forEach(bubble => {
+                bubble.addEventListener('click', function() {
+                    if (!promptArea.disabled) {
+                        promptArea.value = this.innerText;
+                    }
+                });
+            });
+        });
+
         document.getElementById('promptForm').addEventListener('submit', function() {
             const btn = document.getElementById('generateBtn');
             btn.classList.add('loading');
-            btn.disabled = true;
+            // If the prompt area is disabled, the browser won't submit its content,
+            // which is fine since the backend ignores it for stub.
+            // We just need to ensure the button doesn't double click.
+            if (!btn.disabled) {
+                btn.disabled = true;
+            }
         });
     </script>
 </body>
