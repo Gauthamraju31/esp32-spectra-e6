@@ -112,17 +112,29 @@ func (p *RunwareProvider) Generate(ctx context.Context, prompt string) ([]byte, 
 		return nil, "", fmt.Errorf("runware API returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Parse JSON array response
-	var runwareResps []runwareResponse
-	if err := json.NewDecoder(resp.Body).Decode(&runwareResps); err != nil {
-		return nil, "", fmt.Errorf("failed to decode runware response: %w", err)
+	// Parse JSON envelope response
+	var responseEnvelope struct {
+		Data   []runwareResponse `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 
-	if len(runwareResps) == 0 {
-		return nil, "", fmt.Errorf("runware API returned an empty response array")
+	rawBody, _ := io.ReadAll(resp.Body)
+
+	if err := json.Unmarshal(rawBody, &responseEnvelope); err != nil {
+		return nil, "", fmt.Errorf("failed to decode runware response: %w. Body: %s", err, string(rawBody))
 	}
 
-	result := runwareResps[0]
+	if len(responseEnvelope.Errors) > 0 {
+		return nil, "", fmt.Errorf("runware API error: %s", responseEnvelope.Errors[0].Message)
+	}
+
+	if len(responseEnvelope.Data) == 0 {
+		return nil, "", fmt.Errorf("runware API returned success but empty data array")
+	}
+
+	result := responseEnvelope.Data[0]
 	if result.Error {
 		return nil, "", fmt.Errorf("runware API inference error: %s", result.ErrorMessage)
 	}
