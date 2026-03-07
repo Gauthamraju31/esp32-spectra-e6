@@ -109,7 +109,7 @@ func (h *PromptHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 // HandleLogout clears the session cookie.
 func (h *PromptHandler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
+		Name:     "__session",
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,

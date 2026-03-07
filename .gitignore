@@ -15,3 +15,8 @@ server/data/
 
 # Launch scripts with secrets
 server/launch_server.sh
+
+server/.gitignore
+server/firebase.json
+server/.firebaserc
+server/public/

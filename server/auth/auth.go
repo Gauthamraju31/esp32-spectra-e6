@@ -73,7 +73,7 @@ func (m *Manager) ValidateSession(token string) bool {
 // SetSessionCookie sets the authentication cookie on the response.
 func SetSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
+		Name:     "__session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
@@ -84,7 +84,7 @@ func SetSessionCookie(w http.ResponseWriter, token string) {
 
 // GetSessionToken extracts the session token from the request cookie.
 func GetSessionToken(r *http.Request) string {
-	cookie, err := r.Cookie("session")
+	cookie, err := r.Cookie("__session")
 	if err != nil {
 		return ""
 	}
