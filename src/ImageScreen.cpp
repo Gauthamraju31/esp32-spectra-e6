@@ -22,9 +22,17 @@ void ImageScreen::storeImageETag(const String& etag) {
 String ImageScreen::getStoredImageETag() { return String(storedImageETag); }
 
 std::unique_ptr<DownloadResult> ImageScreen::download() {
-  String requestUrl = ditheringServiceUrl + "/process?url=" + downloader.urlEncode(String(config.imageUrl)) +
-                      "&width=" + String(display.width()) + "&height=" + String(display.height()) +
-                      "&dither=true&normalize=false&colors=000000,ffffff,e6e600,cc0000,0033cc,00cc00";
+  String requestUrl;
+  
+#if USE_EXTERNAL_DITHER_SERVICE
+  requestUrl = ditheringServiceUrl + "/process?url=" + downloader.urlEncode(String(config.imageUrl)) +
+               "&width=" + String(display.width()) + "&height=" + String(display.height()) +
+               "&dither=true&normalize=false&colors=000000,ffffff,e6e600,cc0000,0033cc,00cc00";
+  Serial.println("Using external dither service");
+#else
+  requestUrl = String(config.imageUrl);
+  Serial.println("Fetching BMP directly from URL");
+#endif
 
   String storedETag = getStoredImageETag();
   Serial.println("Using stored ETag for request: '" + storedETag + "'");

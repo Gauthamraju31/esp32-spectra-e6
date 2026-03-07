@@ -8,3 +8,7 @@
 
 # Development configuration with credentials
 src/config_dev.h
+
+# Server build artifacts and runtime data
+server/server
+server/data/

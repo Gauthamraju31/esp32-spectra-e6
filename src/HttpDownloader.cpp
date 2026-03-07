@@ -78,6 +78,9 @@ std::unique_ptr<DownloadResult> HttpDownloader::download(const String& url, cons
 std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stream) {
   auto result = std::unique_ptr<DownloadResult>(new DownloadResult());
 
+  // Raise per-read timeout so large chunks don't stall
+  stream->setTimeout(30000);
+
   size_t bufferCapacity = 400 * 1024;
   result->data = (uint8_t*)ps_malloc(bufferCapacity);
   if (!result->data) {
@@ -89,6 +92,7 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stre
   result->size = 0;
 
   while (stream->connected()) {
+    // Read chunk-size line (hex + CRLF)
     char chunkSizeBuffer[16];
     size_t lineLength = stream->readBytesUntil('\n', (uint8_t*)chunkSizeBuffer, sizeof(chunkSizeBuffer) - 1);
     chunkSizeBuffer[lineLength] = '\0';
@@ -98,19 +102,13 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stre
       lineLength--;
     }
 
-    if (lineLength == 0) {
-      continue;
-    }
+    if (lineLength == 0) continue;
 
     long chunkSize = strtol(chunkSizeBuffer, NULL, 16);
+    if (chunkSize == 0) break;  // terminal zero-chunk
 
-    if (chunkSize == 0) {
-      break;
-    }
-
-    if (result->size + chunkSize > bufferCapacity) {
-      bufferCapacity = max(bufferCapacity * 2, (size_t)(result->size + chunkSize + 1024));
-
+    if (result->size + (size_t)chunkSize > bufferCapacity) {
+      bufferCapacity = max(bufferCapacity * 2, result->size + (size_t)chunkSize + 1024);
       result->data = (uint8_t*)ps_realloc(result->data, bufferCapacity);
       if (!result->data) {
         Serial.println("Failed to expand PSRAM buffer");
@@ -119,12 +117,23 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stre
       }
     }
 
-    size_t bytesRead = stream->readBytes(result->data + result->size, chunkSize);
-    if (bytesRead != chunkSize) {
-      Serial.printf("Warning: Expected %ld bytes, got %d bytes\n", chunkSize, bytesRead);
+    // Retry until ALL bytes of this chunk have arrived
+    size_t chunkReceived = 0;
+    while (chunkReceived < (size_t)chunkSize) {
+      size_t toRead = (size_t)chunkSize - chunkReceived;
+      size_t bytesRead = stream->readBytes(result->data + result->size + chunkReceived, toRead);
+      if (bytesRead == 0) {
+        Serial.printf("Stream stalled at chunk offset %d / %ld\n", chunkReceived, chunkSize);
+        break;
+      }
+      chunkReceived += bytesRead;
     }
-    result->size += bytesRead;
+    if (chunkReceived != (size_t)chunkSize) {
+      Serial.printf("Warning: Expected %ld chunk bytes, got %d\n", chunkSize, chunkReceived);
+    }
+    result->size += chunkReceived;
 
+    // Consume the CRLF that follows each chunk body
     uint8_t trailer[2];
     stream->readBytes(trailer, 2);
   }
@@ -140,6 +149,8 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stre
 std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stream) {
   auto result = std::unique_ptr<DownloadResult>(new DownloadResult());
 
+  stream->setTimeout(30000);
+
   size_t bufferCapacity = 400 * 1024;
   result->data = (uint8_t*)ps_malloc(bufferCapacity);
   if (!result->data) {
@@ -149,21 +160,26 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stre
   }
 
   result->size = 0;
-  const size_t chunkSize = 1024;
+  const size_t chunkSize = 4096;
 
-  while (stream->available() > 0) {
-    if (result->size + chunkSize > bufferCapacity) {
-      bufferCapacity = bufferCapacity * 2;
-      result->data = (uint8_t*)ps_realloc(result->data, bufferCapacity);
-      if (!result->data) {
-        result->httpCode = -1;
-        return result;
+  // Keep reading while connected OR while data is still queued in the socket
+  while (stream->connected() || stream->available() > 0) {
+    if (stream->available() > 0) {
+      if (result->size + chunkSize > bufferCapacity) {
+        bufferCapacity = bufferCapacity * 2;
+        result->data = (uint8_t*)ps_realloc(result->data, bufferCapacity);
+        if (!result->data) {
+          result->httpCode = -1;
+          return result;
+        }
       }
+      size_t toRead = min(chunkSize, (size_t)stream->available());
+      size_t bytesRead = stream->readBytes(result->data + result->size, toRead);
+      if (bytesRead == 0) break;
+      result->size += bytesRead;
+    } else {
+      delay(10);  // wait for more data to arrive in the TCP buffer
     }
-
-    size_t bytesRead = stream->readBytes(result->data + result->size, chunkSize);
-    if (bytesRead == 0) break;
-    result->size += bytesRead;
   }
   return result;
 }

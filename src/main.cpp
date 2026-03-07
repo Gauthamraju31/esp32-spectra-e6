@@ -136,6 +136,11 @@ void setup() {
 
   pinMode(BATTERY_PIN, INPUT);
 
+#if defined(EPD_PWR_PRESENT)
+  pinMode(EPD_PWR, OUTPUT);
+  digitalWrite(EPD_PWR, HIGH);  // Power on the e-Paper display
+#endif
+
   SPI.begin(EPD_SCLK, EPD_MISO, EPD_MOSI, EPD_CS);
 
   pinMode(LED_PIN, OUTPUT);

@@ -31,16 +31,11 @@ void ConfigurationScreen::drawQRCode(const String& wifiString, int x, int y, int
     return;
   }
 
-  int blackModules = 0;
-
   for (uint8_t qrModuleY = 0; qrModuleY < qrCodeInstance.size; qrModuleY++) {
     for (uint8_t qrModuleX = 0; qrModuleX < qrCodeInstance.size; qrModuleX++) {
       bool moduleIsBlack = qrcode_getModule(&qrCodeInstance, qrModuleX, qrModuleY);
       if (moduleIsBlack) {
-        blackModules++;
-        int rectX = x + (qrModuleX * scale);
-        int rectY = y + (qrModuleY * scale);
-        display.fillRect(rectX, rectY, scale, scale, GxEPD_BLACK);
+        display.fillRect(x + (qrModuleX * scale), y + (qrModuleY * scale), scale, scale, GxEPD_BLACK);
       }
     }
   }
@@ -53,19 +48,16 @@ void ConfigurationScreen::render() {
   display.setRotation(ApplicationConfig::DISPLAY_ROTATION);
   Serial.printf("Display dimensions: %d x %d\n", display.width(), display.height());
 
-  const int textLeftMargin = 40;
-  const int titleFontSize = 24;
-  const int instructionFontSize = 18;
-  const int lineSpacing = 45;
-  const int qrCodeScale = 6;
+  const int textLeftMargin = 20;
+  const int lineSpacing = 40;
+  const int qrCodeScale = 5;
   const int qrCodeModuleCount = 33;
-  const int qrCodePixelSize = qrCodeModuleCount * qrCodeScale;
-  const int qrCodeQuietZone = 20;
+  const int qrCodePixelSize = qrCodeModuleCount * qrCodeScale;  // 165px
+  const int qrCodeQuietZone = 16;
 
   String wifiQRCodeString = generateWiFiQRString();
 
-  int qrCodeX = display.width() - qrCodePixelSize - qrCodeQuietZone - 40;
-  int qrCodeY = (display.height() - qrCodePixelSize) / 2;
+  bool isPortrait = display.height() > display.width();
 
   gfx.setFontMode(1);
   gfx.setBackgroundColor(GxEPD_BLUE);
@@ -74,52 +66,96 @@ void ConfigurationScreen::render() {
   display.setFullWindow();
   display.fillScreen(GxEPD_WHITE);
 
-  display.fillRect(0, 0, display.width(), 80, GxEPD_BLUE);
+  // ── Header bar ────────────────────────────────────────────────────────
+  display.fillRect(0, 0, display.width(), 70, GxEPD_BLUE);
 
   gfx.setFont(u8g2_font_open_iconic_embedded_4x_t);
-  gfx.setCursor(textLeftMargin, 55);
+  gfx.setCursor(textLeftMargin, 52);
   gfx.print((char)66);
 
   gfx.setFont(u8g2_font_fur17_tr);
-  gfx.setCursor(textLeftMargin + 40, 50);
+  gfx.setCursor(textLeftMargin + 38, 47);
   gfx.print("Configuration Mode");
 
   gfx.setBackgroundColor(GxEPD_WHITE);
   gfx.setForegroundColor(GxEPD_BLACK);
 
-  int currentY = 140;
+  if (isPortrait) {
+    // ── Portrait layout: instructions at top, QR code centred below ──────
+    int currentY = 110;
+    gfx.setFont(u8g2_font_fur14_tr);
 
-  gfx.setFont(u8g2_font_fur17_tr);
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("1. Scan QR code below");
+    currentY += lineSpacing;
 
-  gfx.setCursor(textLeftMargin, currentY);
-  gfx.print("1. Scan QR code with your phone");
-  currentY += lineSpacing;
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("2. Connect to WiFi:");
+    currentY += 28;
 
-  gfx.setCursor(textLeftMargin, currentY);
-  gfx.print("2. Connect to WiFi network:");
-  currentY += 25;
+    gfx.setFont(u8g2_font_courB14_tr);
+    gfx.setCursor(textLeftMargin + 16, currentY);
+    gfx.print(ConfigurationServer::WIFI_AP_NAME);
+    currentY += lineSpacing;
 
-  gfx.setFont(u8g2_font_courB14_tr);
-  gfx.setCursor(textLeftMargin + 30, currentY);
-  gfx.print(ConfigurationServer::WIFI_AP_NAME);
-  currentY += lineSpacing;
+    gfx.setFont(u8g2_font_fur14_tr);
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("3. Open browser & configure");
+    currentY += lineSpacing;
 
-  gfx.setFont(u8g2_font_fur17_tr);
-  gfx.setCursor(textLeftMargin, currentY);
-  gfx.print("3. Open web browser and configure");
-  currentY += lineSpacing;
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("4. Save settings and exit");
+    currentY += lineSpacing + 10;
 
-  gfx.setCursor(textLeftMargin, currentY);
-  gfx.print("4. Save settings and exit");
+    // QR code centred horizontally below the instructions
+    int qrCodeX = (display.width() - qrCodePixelSize) / 2;
+    int qrCodeY = currentY;
 
-  int qrBgX = qrCodeX - qrCodeQuietZone;
-  int qrBgY = qrCodeY - qrCodeQuietZone;
-  int qrBgSize = qrCodePixelSize + (2 * qrCodeQuietZone);
+    int qrBgSize = qrCodePixelSize + 2 * qrCodeQuietZone;
+    int qrBgX = qrCodeX - qrCodeQuietZone;
+    int qrBgY = qrCodeY - qrCodeQuietZone;
 
-  display.fillRect(qrBgX - 5, qrBgY - 5, qrBgSize + 10, qrBgSize + 10, GxEPD_RED);
-  display.fillRect(qrBgX, qrBgY, qrBgSize, qrBgSize, GxEPD_WHITE);
+    display.fillRect(qrBgX - 4, qrBgY - 4, qrBgSize + 8, qrBgSize + 8, GxEPD_RED);
+    display.fillRect(qrBgX, qrBgY, qrBgSize, qrBgSize, GxEPD_WHITE);
+    drawQRCode(wifiQRCodeString, qrCodeX, qrCodeY, qrCodeScale);
 
-  drawQRCode(wifiQRCodeString, qrCodeX, qrCodeY, qrCodeScale);
+  } else {
+    // ── Landscape layout: text on left, QR code on right ─────────────────
+    int qrCodeX = display.width() - qrCodePixelSize - qrCodeQuietZone - 30;
+    int qrCodeY = (display.height() - qrCodePixelSize) / 2;
+
+    int currentY = 130;
+    gfx.setFont(u8g2_font_fur17_tr);
+
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("1. Scan QR code with your phone");
+    currentY += lineSpacing;
+
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("2. Connect to WiFi network:");
+    currentY += 25;
+
+    gfx.setFont(u8g2_font_courB14_tr);
+    gfx.setCursor(textLeftMargin + 30, currentY);
+    gfx.print(ConfigurationServer::WIFI_AP_NAME);
+    currentY += lineSpacing;
+
+    gfx.setFont(u8g2_font_fur17_tr);
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("3. Open web browser and configure");
+    currentY += lineSpacing;
+
+    gfx.setCursor(textLeftMargin, currentY);
+    gfx.print("4. Save settings and exit");
+
+    int qrBgSize = qrCodePixelSize + 2 * qrCodeQuietZone;
+    int qrBgX = qrCodeX - qrCodeQuietZone;
+    int qrBgY = qrCodeY - qrCodeQuietZone;
+
+    display.fillRect(qrBgX - 5, qrBgY - 5, qrBgSize + 10, qrBgSize + 10, GxEPD_RED);
+    display.fillRect(qrBgX, qrBgY, qrBgSize, qrBgSize, GxEPD_WHITE);
+    drawQRCode(wifiQRCodeString, qrCodeX, qrCodeY, qrCodeScale);
+  }
 
   display.display();
   display.hibernate();

@@ -36,7 +36,8 @@ See also the [blog post](https://blog.shvn.dev/posts/2025-esp32-spectra-e6/) for
 
 1. Install PlatformIO
 2. Clone this repository
-3. **Configure display type** (if using a different display):
+3. **Configure display type & features** (if necessary):
+   - Edit `src/config_default.h` to change `USE_EXTERNAL_DITHER_SERVICE` if you want to use the public `dither.shvn.dev` API instead of the local server
    - Edit `src/DisplayType.h` to match your specific e-paper display
    - Update pin definitions in `include/boards.h` if needed
 4. Build and upload the firmware:
@@ -65,3 +66,48 @@ Configuration mode will automatically activate if WiFi connection fails or crede
 - **Configuration mode**: Automatically shown when no WiFi credentials are configured or WiFi connection fails
 - **Battery monitoring**: Current battery level is displayed on screen
 - **ETag caching**: Only downloads new images when they've changed (saves bandwidth and battery)
+
+## Server
+
+The `server/` directory contains a Go web server that provides a web UI for generating images, dithering them for the e-paper display, and serving them to the ESP32.
+
+### Image Providers
+
+| Provider | `IMAGE_PROVIDER` | Description |
+|----------|-----------------|-------------|
+| **Stub** (default) | `stub` | Fetches random photos from [picsum.photos](https://picsum.photos/) — useful for testing the pipeline without an API key |
+| **OpenAI** | `openai` | Generates images via OpenAI's DALL-E API |
+| **NanoBanana** | `nanobanana` | Generates images via the NanoBanana API |
+
+### Running the Server
+
+```bash
+cd server
+go build -o server .
+PASSWORD=your_password ./server
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | Server port |
+| `PASSWORD` | *(required)* | Access password for the web UI |
+| `IMAGE_PROVIDER` | `stub` | Image provider (`stub`, `openai`, `nanobanana`) |
+| `OPENAI_API_KEY` | — | Required when `IMAGE_PROVIDER=openai` |
+| `NANOBANANA_API_KEY` | — | Required when `IMAGE_PROVIDER=nanobanana` |
+| `NANOBANANA_URL` | `https://api.nanobanana.com` | NanoBanana API endpoint |
+| `DITHER_SERVICE_URL` | `https://dither.shvn.dev` | Remote dither service URL |
+| `DITHER_MODE` | `local_with_fallback` | `local`, `remote`, or `local_with_fallback` |
+| `DAILY_RATE_LIMIT` | `10` | Max image generations per day |
+| `DISPLAY_WIDTH` | `600` | E-paper display width in pixels |
+| `DISPLAY_HEIGHT` | `400` | E-paper display height in pixels |
+| `DATA_DIR` | `./data` | Directory for storing generated images |
+
+### Web UI Features
+
+- **Prompt-based generation**: Enter a text prompt to generate an image
+- **Orientation toggle**: Switch between landscape and portrait modes
+- **Side-by-side preview**: View both the original and dithered (e-paper) images
+- **Rate limiting**: Configurable daily generation limit
+- **Authentication**: Password-protected access

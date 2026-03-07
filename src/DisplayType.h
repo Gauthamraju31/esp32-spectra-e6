@@ -3,10 +3,10 @@
 
 #include <GxEPD2_7C.h>
 
-// Define here which display type to use - using 7.3" color e-paper
+#include "GxEPD2_400c_GDEP040E01.h"
 
-// Display instance for 7.3" color e-paper - using reduced buffer
-using DisplayType = GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT>;
-using Epd2Type = GxEPD2_730c_GDEP073E01;
+// Display instance for 4" Waveshare 27367 (Spectra 6 E Ink, GDEP040E01, 600x400, 6-color)
+using DisplayType = GxEPD2_7C<GxEPD2_400c_GDEP040E01, GxEPD2_400c_GDEP040E01::HEIGHT>;
+using Epd2Type = GxEPD2_400c_GDEP040E01;
 
 #endif
