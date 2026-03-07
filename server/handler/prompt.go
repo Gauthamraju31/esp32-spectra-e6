@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -22,10 +23,11 @@ type PromptHandler struct {
 	limiter       *ratelimit.Limiter
 	provider      provider.ImageProvider
 	ditherer      *dither.Ditherer
-	store         *store.ImageStore
+	store         store.ImageStore
 	templates     *template.Template
 	displayWidth  int
 	displayHeight int
+	cdnDomain     string
 }
 
 // NewPromptHandler creates a new prompt handler.
@@ -34,8 +36,9 @@ func NewPromptHandler(
 	limiter *ratelimit.Limiter,
 	prov provider.ImageProvider,
 	d *dither.Ditherer,
-	s *store.ImageStore,
+	s store.ImageStore,
 	displayWidth, displayHeight int,
+	cdnDomain string,
 ) *PromptHandler {
 	tmpl := template.Must(template.New("").Parse(loginTemplate + promptTemplate))
 	return &PromptHandler{
@@ -47,6 +50,7 @@ func NewPromptHandler(
 		templates:     tmpl,
 		displayWidth:  displayWidth,
 		displayHeight: displayHeight,
+		cdnDomain:     cdnDomain,
 	}
 }
 
@@ -57,15 +61,18 @@ type loginData struct {
 type promptData struct {
 	ProviderName  string
 	Remaining     int
-	Limit         int
-	HasImage      bool
-	UpdatedAt     string
-	Success       string
+	Limit             int
+	HasImage          bool
+	UpdatedAt         string
+	HasFirmware       bool
+	FirmwareUpdatedAt string
+	Success           string
 	Error         string
 	Prompt        string
 	Orientation   string
 	DisplayWidth  int
 	DisplayHeight int
+	CdnDomain     string
 }
 
 // HandleLogin renders the login page.
@@ -118,16 +125,38 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 		Remaining:     h.limiter.Remaining(),
 		Limit:         h.limiter.Limit(),
 		HasImage:      h.store.HasImage(),
+		HasFirmware:   h.store.HasFirmware(),
 		Orientation:   "landscape",
 		DisplayWidth:  h.displayWidth,
 		DisplayHeight: h.displayHeight,
+		CdnDomain:     h.cdnDomain,
 	}
 
 	if h.store.HasImage() {
 		data.UpdatedAt = h.store.UpdatedAt().Format(time.RFC822)
 	}
+	if h.store.HasFirmware() {
+		data.FirmwareUpdatedAt = h.store.FirmwareUpdatedAt().Format(time.RFC822)
+	}
 
 	if r.Method == http.MethodGet {
+		if r.URL.Query().Get("success") == "firmware" {
+			data.Success = "Firmware successfully uploaded to storage."
+		}
+		if errCode := r.URL.Query().Get("error"); errCode != "" {
+			switch errCode {
+			case "upload_too_large":
+				data.Error = "Firmware file is too large (maximum 4 MB)."
+			case "no_file":
+				data.Error = "No firmware file was provided."
+			case "read_error":
+				data.Error = "Failed to read the uploaded firmware file."
+			case "save_error":
+				data.Error = "Failed to securely save the firmware to storage."
+			default:
+				data.Error = "Failed to upload firmware."
+			}
+		}
 		h.templates.ExecuteTemplate(w, "prompt", data)
 		return
 	}
@@ -210,6 +239,50 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 	data.Remaining = h.limiter.Remaining()
 	data.UpdatedAt = time.Now().Format(time.RFC822)
 	h.templates.ExecuteTemplate(w, "prompt", data)
+}
+
+// HandleFirmwareUpload handles uploading a .bin file for OTA updates.
+func (h *PromptHandler) HandleFirmwareUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/prompt", http.StatusSeeOther)
+		return
+	}
+
+	// Security: Enforce a strict 4MB upload limit to prevent memory/disk exhaustion attacks.
+	// Most ESP32 OTA partitions are well under 4MB.
+	const maxUploadSize = 4 << 20 // 4 MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	err := r.ParseMultipartForm(maxUploadSize)
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			http.Redirect(w, r, "/prompt?error=upload_too_large", http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/prompt?error=upload_failed", http.StatusSeeOther)
+		return
+	}
+
+	file, _, err := r.FormFile("firmware")
+	if err != nil {
+		http.Redirect(w, r, "/prompt?error=no_file", http.StatusSeeOther)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Redirect(w, r, "/prompt?error=read_error", http.StatusSeeOther)
+		return
+	}
+
+	if err := h.store.SaveFirmware(data); err != nil {
+		log.Printf("Failed to save firmware: %v", err)
+		http.Redirect(w, r, "/prompt?error=save_error", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/prompt?success=firmware", http.StatusSeeOther)
 }
 
 // HandleRoot redirects to the appropriate page.
@@ -779,6 +852,26 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
         </div>
 
         <div class="card">
+            <div class="card-title">OTA Firmware Update</div>
+            <form method="POST" action="/firmware/upload" enctype="multipart/form-data">
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <input type="file" name="firmware" accept=".bin" required class="prompt-area" style="min-height: auto; padding: 0.75rem;" />
+                </div>
+                <div class="prompt-footer">
+                    <span class="provider-info">{{if .HasFirmware}}Current firmware: {{.FirmwareUpdatedAt}}{{else}}No firmware uploaded yet{{end}}</span>
+                    <button type="submit" class="btn">
+                        <span class="btn-text">⬆️ Upload .bin</span>
+                    </button>
+                </div>
+            </form>
+            {{if and .HasFirmware .CdnDomain}}
+            <div style="margin-top: 1rem; text-align: center; font-size: 0.8rem; color: #a1a1aa; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+                Hosted at: <a href="https://{{.CdnDomain}}/firmware/current.bin" target="_blank" style="color: #8b5cf6; text-decoration: none;">https://{{.CdnDomain}}/firmware/current.bin</a>
+            </div>
+            {{end}}
+        </div>
+
+        <div class="card">
             <div class="card-title">Current Display Image</div>
             <div class="preview-section">
                 {{if .HasImage}}
@@ -798,8 +891,13 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
                 </div>
                 <div class="preview-meta">
                     <span>Updated: {{.UpdatedAt}}</span>
-                    <span>6-color Spectra E6</span>
                 </div>
+                {{if .CdnDomain}}
+                <div style="margin-top: 1rem; text-align: center; font-size: 0.8rem; color: #a1a1aa; display: flex; flex-direction: column; gap: 0.25rem;">
+                    <span>Hosted at: <a href="https://{{.CdnDomain}}/image/current.bmp" target="_blank" style="color: #8b5cf6; text-decoration: none;">https://{{.CdnDomain}}/image/current.bmp</a></span>
+                    <span>Preview original: <a href="https://{{.CdnDomain}}/image/original.jpg" target="_blank" style="color: #8b5cf6; text-decoration: none;">https://{{.CdnDomain}}/image/original.jpg</a> (or .png)</span>
+                </div>
+                {{end}}
                 <div class="palette-dots">
                     <span class="palette-dot" style="background: #000000;" title="Black"></span>
                     <span class="palette-dot" style="background: #ffffff;" title="White"></span>

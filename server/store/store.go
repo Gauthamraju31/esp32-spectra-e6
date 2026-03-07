@@ -10,22 +10,41 @@ import (
 	"time"
 )
 
-// ImageStore manages the current dithered image on disk
-// and provides ETag-based caching for the ESP32.
-type ImageStore struct {
-	dataDir   string
-	etag      string
-	updatedAt time.Time
-	mu        sync.RWMutex
+// ImageStore defines the interface for storing and retrieving images.
+type ImageStore interface {
+	Save(data []byte) error
+	SaveOriginal(data []byte, contentType string) error
+	Load() ([]byte, error)
+	LoadOriginal() ([]byte, string, error)
+	ETag() string
+	HasImage() bool
+	UpdatedAt() time.Time
+
+	SaveFirmware(data []byte) error
+	LoadFirmware() ([]byte, error)
+	FirmwareETag() string
+	HasFirmware() bool
+	FirmwareUpdatedAt() time.Time
 }
 
-// NewImageStore creates a new image store and ensures the data directory exists.
-func NewImageStore(dataDir string) (*ImageStore, error) {
+// DiskStore manages the current dithered image on disk
+// and provides ETag-based caching for the ESP32.
+type DiskStore struct {
+	dataDir           string
+	etag              string
+	updatedAt         time.Time
+	firmwareEtag      string
+	firmwareUpdatedAt time.Time
+	mu                sync.RWMutex
+}
+
+// NewDiskStore creates a new disk store and ensures the data directory exists.
+func NewDiskStore(dataDir string) (*DiskStore, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	s := &ImageStore{dataDir: dataDir}
+	s := &DiskStore{dataDir: dataDir}
 
 	// Load existing image and compute ETag if present
 	if data, err := os.ReadFile(s.imagePath()); err == nil {
@@ -35,11 +54,19 @@ func NewImageStore(dataDir string) (*ImageStore, error) {
 		}
 	}
 
+	// Load existing firmware and compute ETag if present
+	if data, err := os.ReadFile(s.firmwarePath()); err == nil {
+		s.firmwareEtag = computeETag(data)
+		if info, err := os.Stat(s.firmwarePath()); err == nil {
+			s.firmwareUpdatedAt = info.ModTime()
+		}
+	}
+
 	return s, nil
 }
 
 // Save stores the dithered BMP image and updates the ETag.
-func (s *ImageStore) Save(data []byte) error {
+func (s *DiskStore) Save(data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -54,7 +81,7 @@ func (s *ImageStore) Save(data []byte) error {
 }
 
 // SaveOriginal stores the original (pre-dithered) image for preview purposes.
-func (s *ImageStore) SaveOriginal(data []byte, contentType string) error {
+func (s *DiskStore) SaveOriginal(data []byte, contentType string) error {
 	ext := ".png"
 	if contentType == "image/jpeg" {
 		ext = ".jpg"
@@ -65,7 +92,7 @@ func (s *ImageStore) SaveOriginal(data []byte, contentType string) error {
 }
 
 // Load returns the current dithered BMP image data.
-func (s *ImageStore) Load() ([]byte, error) {
+func (s *DiskStore) Load() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -73,7 +100,7 @@ func (s *ImageStore) Load() ([]byte, error) {
 }
 
 // LoadOriginal returns the original image data for preview.
-func (s *ImageStore) LoadOriginal() ([]byte, string, error) {
+func (s *DiskStore) LoadOriginal() ([]byte, string, error) {
 	// Try PNG first, then JPEG
 	for _, ext := range []string{".png", ".jpg"} {
 		path := filepath.Join(s.dataDir, "original"+ext)
@@ -89,14 +116,14 @@ func (s *ImageStore) LoadOriginal() ([]byte, string, error) {
 }
 
 // ETag returns the current ETag for cache validation.
-func (s *ImageStore) ETag() string {
+func (s *DiskStore) ETag() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.etag
 }
 
 // HasImage returns true if an image has been stored.
-func (s *ImageStore) HasImage() bool {
+func (s *DiskStore) HasImage() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -104,15 +131,59 @@ func (s *ImageStore) HasImage() bool {
 	return err == nil
 }
 
-// UpdatedAt returns when the image was last updated.
-func (s *ImageStore) UpdatedAt() time.Time {
+func (s *DiskStore) UpdatedAt() time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.updatedAt
 }
 
-func (s *ImageStore) imagePath() string {
+func (s *DiskStore) SaveFirmware(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := os.WriteFile(s.firmwarePath(), data, 0644); err != nil {
+		return fmt.Errorf("failed to save firmware: %w", err)
+	}
+
+	s.firmwareEtag = computeETag(data)
+	s.firmwareUpdatedAt = time.Now()
+
+	return nil
+}
+
+func (s *DiskStore) LoadFirmware() ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return os.ReadFile(s.firmwarePath())
+}
+
+func (s *DiskStore) FirmwareETag() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.firmwareEtag
+}
+
+func (s *DiskStore) HasFirmware() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	_, err := os.Stat(s.firmwarePath())
+	return err == nil
+}
+
+func (s *DiskStore) FirmwareUpdatedAt() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.firmwareUpdatedAt
+}
+
+func (s *DiskStore) imagePath() string {
 	return filepath.Join(s.dataDir, "current.bmp")
+}
+
+func (s *DiskStore) firmwarePath() string {
+	return filepath.Join(s.dataDir, "current.bin")
 }
 
 func computeETag(data []byte) string {

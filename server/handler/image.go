@@ -9,11 +9,11 @@ import (
 
 // ImageHandler serves the dithered BMP image for the ESP32 to download.
 type ImageHandler struct {
-	store *store.ImageStore
+	store store.ImageStore
 }
 
 // NewImageHandler creates a new image handler.
-func NewImageHandler(s *store.ImageStore) *ImageHandler {
+func NewImageHandler(s store.ImageStore) *ImageHandler {
 	return &ImageHandler{store: s}
 }
 
@@ -55,5 +55,31 @@ func (h *ImageHandler) ServeOriginal(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(data)
+}
+
+// ServeFirmware handles GET /firmware — serves the current firmware bin.
+func (h *ImageHandler) ServeFirmware(w http.ResponseWriter, r *http.Request) {
+	if !h.store.HasFirmware() {
+		http.Error(w, "No firmware available yet", http.StatusNotFound)
+		return
+	}
+
+	etag := h.store.FirmwareETag()
+	if match := r.Header.Get("If-None-Match"); match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	data, err := h.store.LoadFirmware()
+	if err != nil {
+		http.Error(w, "Failed to load firmware", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Write(data)
 }

@@ -77,8 +77,12 @@ func (d *Ditherer) processLocalWithSize(imgData []byte, width, height int) ([]by
 		return nil, fmt.Errorf("failed to decode image: %w", err)
 	}
 
+	// Apply e-paper color correction to enhance saturation before dithering so
+	// the resulting image pops better on the desaturated E6 e-paper display.
+	correctedImg := colorCorrectForEPaper(src)
+
 	// Scale the image to display dimensions
-	scaled := scaleImage(src, width, height)
+	scaled := scaleImage(correctedImg, width, height)
 
 	// Apply Floyd-Steinberg dithering with our 6-color palette
 	dithered := floydSteinberg(scaled, width, height)
@@ -149,6 +153,51 @@ func scaleImage(src image.Image, targetW, targetH int) *image.RGBA {
 			// Bilinear interpolation
 			c := bilinearSample(src, srcX, srcY)
 			dst.SetRGBA(x, y, c)
+		}
+	}
+
+	return dst
+}
+
+// colorCorrectForEPaper applies a color correction pass tailored to the ACeP 6-color Spectra E6 display.
+// E-paper naturally looks washed out. Pushing the saturation and slightly adjusting gamma helps
+// the Floyd-Steinberg algorithm 'snap' colors to the vibrant Red/Yellow/Blue/Green palette much better.
+func colorCorrectForEPaper(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewRGBA(bounds)
+
+	const saturationBoost = 1.4 // Boost saturation by 40%
+	const contrastBoost = 1.1   // Boost contrast by 10%
+	
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := src.At(x, y)
+			r, g, b, _ := c.RGBA()
+
+			// Convert from strictly 16-bit to 8-bit floats [0-255]
+			fr, fg, fb := float64(r>>8), float64(g>>8), float64(b>>8)
+
+			// 1. Contrast adjustment (around midpoint 128)
+			fr = ((fr - 128.0) * contrastBoost) + 128.0
+			fg = ((fg - 128.0) * contrastBoost) + 128.0
+			fb = ((fb - 128.0) * contrastBoost) + 128.0
+
+			// 2. Saturation boost
+			// Calculate luminance
+			l := 0.2989*fr + 0.5870*fg + 0.1140*fb
+
+			// Push colors away from luminance
+			fr = l + (fr-l)*saturationBoost
+			fg = l + (fg-l)*saturationBoost
+			fb = l + (fb-l)*saturationBoost
+
+			// Clamp back to [0, 255]
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8(math.Min(255, math.Max(0, fr))),
+				G: uint8(math.Min(255, math.Max(0, fg))),
+				B: uint8(math.Min(255, math.Max(0, fb))),
+				A: 255,
+			})
 		}
 	}
 

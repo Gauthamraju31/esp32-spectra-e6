@@ -20,6 +20,11 @@ type Config struct {
 	DisplayWidth     int
 	DisplayHeight    int
 	DataDir          string
+	S3Endpoint       string
+	S3AccessKey      string
+	S3SecretKey      string
+	S3BucketName     string
+	CdnDomain        string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -36,7 +41,12 @@ func Load() (*Config, error) {
 		DailyRateLimit:   getEnvInt("DAILY_RATE_LIMIT", 10),
 		DisplayWidth:     getEnvInt("DISPLAY_WIDTH", 600),
 		DisplayHeight:    getEnvInt("DISPLAY_HEIGHT", 400),
-		DataDir:          getEnv("DATA_DIR", "./data"),
+		DataDir:          getEnv("DATA_DIR", getDefaultDataDir()),
+		S3Endpoint:       getEnv("S3_ENDPOINT", ""),
+		S3AccessKey:      getEnv("S3_ACCESS_KEY", ""),
+		S3SecretKey:      getEnv("S3_SECRET_KEY", ""),
+		S3BucketName:     getEnv("S3_BUCKET_NAME", ""),
+		CdnDomain:        getEnv("CDN_DOMAIN", ""),
 	}
 
 	if cfg.Password == "" {
@@ -60,4 +70,12 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func getDefaultDataDir() string {
+	// App Engine Standard and Cloud Run have a read-only filesystem except for /tmp
+	if os.Getenv("GAE_ENV") != "" || os.Getenv("GAE_APPLICATION") != "" || os.Getenv("K_SERVICE") != "" {
+		return "/tmp/esp32-data"
+	}
+	return "./data"
 }

@@ -46,15 +46,26 @@ func main() {
 	limiter := ratelimit.NewLimiter(cfg.DailyRateLimit)
 	ditherer := dither.NewDitherer(cfg.DitherServiceURL, cfg.DitherMode, cfg.DisplayWidth, cfg.DisplayHeight)
 
-	imgStore, err := store.NewImageStore(cfg.DataDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize image store: %v\n", err)
-		os.Exit(1)
+	var imgStore store.ImageStore
+	if cfg.S3Endpoint != "" && cfg.S3AccessKey != "" && cfg.S3SecretKey != "" && cfg.S3BucketName != "" {
+		imgStore, err = store.NewS3Store(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3BucketName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize S3 image store: %v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("   Storage: S3/R2 (%s)", cfg.S3BucketName)
+	} else {
+		imgStore, err = store.NewDiskStore(cfg.DataDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize local disk image store: %v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("   Storage: Local Disk (%s)", cfg.DataDir)
 	}
 
 	// Initialize handlers
 	imgHandler := handler.NewImageHandler(imgStore)
-	promptHandler := handler.NewPromptHandler(authMgr, limiter, prov, ditherer, imgStore, cfg.DisplayWidth, cfg.DisplayHeight)
+	promptHandler := handler.NewPromptHandler(authMgr, limiter, prov, ditherer, imgStore, cfg.DisplayWidth, cfg.DisplayHeight, cfg.CdnDomain)
 
 	// Setup routes
 	mux := http.NewServeMux()
@@ -65,9 +76,11 @@ func main() {
 	mux.HandleFunc("/logout", promptHandler.HandleLogout)
 	mux.HandleFunc("/image", imgHandler.ServeImage)
 	mux.HandleFunc("/image/original", imgHandler.ServeOriginal)
+	mux.HandleFunc("/firmware", imgHandler.ServeFirmware)
 
 	// Protected routes (behind auth middleware)
 	mux.Handle("/prompt", authMgr.Middleware(http.HandlerFunc(promptHandler.HandlePrompt)))
+	mux.Handle("/firmware/upload", authMgr.Middleware(http.HandlerFunc(promptHandler.HandleFirmwareUpload)))
 
 	// Logging middleware
 	loggedMux := loggingMiddleware(mux)

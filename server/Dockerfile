@@ -1,0 +1,22 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+COPY go.mod ./
+RUN go mod download || true
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o server .
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /app/server .
+
+# Create tmp directory for image cache
+RUN mkdir -p /tmp/esp32-data
+
+# The port is provided by Cloud Run via the PORT environment variable
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["./server"]
