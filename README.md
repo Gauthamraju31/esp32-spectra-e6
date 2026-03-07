@@ -103,11 +103,31 @@ PASSWORD=your_password ./server
 | `DISPLAY_WIDTH` | `600` | E-paper display width in pixels |
 | `DISPLAY_HEIGHT` | `400` | E-paper display height in pixels |
 | `DATA_DIR` | `./data` | Directory for storing generated images |
+| `S3_ENDPOINT` | — | Target URL for S3/R2 storage (e.g. `https://<hash>.r2.cloudflarestorage.com`) |
+| `S3_ACCESS_KEY` | — | S3 compatible access key |
+| `S3_SECRET_KEY` | — | S3 compatible secret key |
+| `S3_BUCKET_NAME` | — | The bucket name to upload dithered and preview images into |
 
 ### Web UI Features
 
 - **Prompt-based generation**: Enter a text prompt to generate an image
 - **Orientation toggle**: Switch between landscape and portrait modes
 - **Side-by-side preview**: View both the original and dithered (e-paper) images
-- **Rate limiting**: Configurable daily generation limit
-- **Authentication**: Password-protected access
+### Deploying to Google Cloud Run (Automated via GitHub Actions)
+
+The server is containerized and supports automated deployment to Google Cloud Run via GitHub Actions.
+
+1. Create a Google Cloud Project and enable the **Cloud Run API** and **Artifact Registry API**.
+2. Create an Artifact Registry Docker repository named `esp32-spectra` in `us-central1`.
+3. Create a Service Account with the following roles:
+   - `Cloud Run Admin`
+   - `Artifact Registry Writer`
+   - `Service Account User` (required to act as the compute service account)
+4. Generate a JSON key for this Service Account.
+5. In your GitHub repository, go to **Settings > Secrets and variables > Actions** and add:
+   - `GCP_PROJECT_ID`: Your Google Cloud project ID (e.g. `my-awesome-project-123456`).
+   - `GCP_CREDENTIALS`: Paste the contents of the Service Account JSON key.
+   - `APP_PASSWORD`: The password you want to use for the web UI.
+
+Any push to the `main` branch that modifies files in the `server/` directory will automatically build the Docker image, push it to Artifact Registry, and deploy it to Cloud Run. The server automatically detects the Cloud Run environment and uses its temporary filesystem (`/tmp/esp32-data`) for image caching.
+

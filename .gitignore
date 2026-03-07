@@ -12,3 +12,6 @@ src/config_dev.h
 # Server build artifacts and runtime data
 server/server
 server/data/
+
+# Launch scripts with secrets
+server/launch_server.sh
