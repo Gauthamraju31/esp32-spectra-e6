@@ -30,5 +30,5 @@ class HttpDownloader {
 
  private:
   std::unique_ptr<DownloadResult> downloadChunked(WiFiClient* stream);
-  std::unique_ptr<DownloadResult> downloadRegular(WiFiClient* stream);
+  std::unique_ptr<DownloadResult> downloadRegular(WiFiClient* stream, int contentLength);
 };

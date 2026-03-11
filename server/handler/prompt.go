@@ -160,6 +160,8 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 				data.Error = "No firmware file was provided."
 			case "read_error":
 				data.Error = "Failed to read the uploaded firmware file."
+			case "invalid_firmware":
+				data.Error = "Invalid firmware file. Must be a valid ESP32 binary."
 			case "save_error":
 				data.Error = "Failed to securely save the firmware to storage."
 			default:
@@ -295,6 +297,13 @@ func (h *PromptHandler) HandleFirmwareUpload(w http.ResponseWriter, r *http.Requ
 	data, err := io.ReadAll(file)
 	if err != nil {
 		http.Redirect(w, r, "/prompt?error=read_error", http.StatusSeeOther)
+		return
+	}
+
+	// Validate ESP32 Magic Byte (0xE9)
+	if len(data) == 0 || data[0] != 0xE9 {
+		log.Printf("Invalid firmware file uploaded (missing 0xE9 magic byte)")
+		http.Redirect(w, r, "/prompt?error=invalid_firmware", http.StatusSeeOther)
 		return
 	}
 

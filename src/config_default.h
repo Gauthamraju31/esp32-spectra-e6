@@ -7,6 +7,7 @@
 const char DEFAULT_WIFI_SSID[] = "";
 const char DEFAULT_WIFI_PASSWORD[] = "";
 const char DEFAULT_IMAGE_URL[] = "";
+const char DEFAULT_OTA_URL[] = "";
 
 // const char DEFAULT_WIFI_SSID[] = "GauthamWifi";
 // const char DEFAULT_WIFI_PASSWORD[] = "puduhatty";

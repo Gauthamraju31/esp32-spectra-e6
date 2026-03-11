@@ -1,6 +1,7 @@
 #include "HttpDownloader.h"
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 HttpDownloader::HttpDownloader() {}
 
@@ -10,9 +11,19 @@ std::unique_ptr<DownloadResult> HttpDownloader::download(const String& url, cons
   HTTPClient http;
   auto result = std::unique_ptr<DownloadResult>(new DownloadResult());
 
+  std::unique_ptr<WiFiClientSecure> secureClient;
+  std::unique_ptr<WiFiClient> plainClient;
+
   Serial.println("Requesting data from: " + url);
 
-  http.begin(url);
+  if (url.startsWith("https://")) {
+    secureClient.reset(new WiFiClientSecure());
+    secureClient->setInsecure();
+    http.begin(*secureClient, url);
+  } else {
+    plainClient.reset(new WiFiClient());
+    http.begin(*plainClient, url);
+  }
   http.setTimeout(10000);
 
   if (cachedETag.length() > 0) {
@@ -55,13 +66,14 @@ std::unique_ptr<DownloadResult> HttpDownloader::download(const String& url, cons
 
   String transferEncoding = http.header("Transfer-Encoding");
   bool isChunked = transferEncoding.indexOf("chunked") != -1;
+  int contentLength = http.getSize();
 
   WiFiClient* stream = http.getStreamPtr();
 
   if (isChunked) {
     result = downloadChunked(stream);
   } else {
-    result = downloadRegular(stream);
+    result = downloadRegular(stream, contentLength);
   }
 
   http.end();
@@ -146,12 +158,12 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadChunked(WiFiClient* stre
   return result;
 }
 
-std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stream) {
+std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stream, int contentLength) {
   auto result = std::unique_ptr<DownloadResult>(new DownloadResult());
 
   stream->setTimeout(30000);
 
-  size_t bufferCapacity = 400 * 1024;
+  size_t bufferCapacity = (contentLength > 0) ? (size_t)contentLength : 400 * 1024;
   result->data = (uint8_t*)ps_malloc(bufferCapacity);
   if (!result->data) {
     Serial.println("Failed to allocate PSRAM buffer");
@@ -164,6 +176,10 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stre
 
   // Keep reading while connected OR while data is still queued in the socket
   while (stream->connected() || stream->available() > 0) {
+    if (contentLength > 0 && result->size >= (size_t)contentLength) {
+      break;
+    }
+    
     if (stream->available() > 0) {
       if (result->size + chunkSize > bufferCapacity) {
         bufferCapacity = bufferCapacity * 2;
@@ -174,6 +190,9 @@ std::unique_ptr<DownloadResult> HttpDownloader::downloadRegular(WiFiClient* stre
         }
       }
       size_t toRead = min(chunkSize, (size_t)stream->available());
+      if (contentLength > 0) {
+        toRead = min(toRead, (size_t)contentLength - result->size);
+      }
       size_t bytesRead = stream->readBytes(result->data + result->size, toRead);
       if (bytesRead == 0) break;
       result->size += bytesRead;

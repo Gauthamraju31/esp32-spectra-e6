@@ -20,3 +20,5 @@ server/.gitignore
 server/firebase.json
 server/.firebaserc
 server/public/
+
+build.log

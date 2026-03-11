@@ -23,7 +23,7 @@ String ImageScreen::getStoredImageETag() { return String(storedImageETag); }
 
 std::unique_ptr<DownloadResult> ImageScreen::download() {
   String requestUrl;
-  
+
 #if USE_EXTERNAL_DITHER_SERVICE
   requestUrl = ditheringServiceUrl + "/process?url=" + downloader.urlEncode(String(config.imageUrl)) +
                "&width=" + String(display.width()) + "&height=" + String(display.height()) +
@@ -332,4 +332,4 @@ void ImageScreen::displayBatteryStatus() {
   gfx.print(batteryStatus);
 }
 
-int ImageScreen::nextRefreshInSeconds() { return 1800; }
+int ImageScreen::nextRefreshInSeconds() { return 60; }

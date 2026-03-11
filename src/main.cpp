@@ -11,6 +11,7 @@
 #include "ConfigurationServer.h"
 #include "DisplayType.h"
 #include "ImageScreen.h"
+#include "OtaUpdater.h"
 #include "WiFiConnection.h"
 #include "battery.h"
 #include "boards.h"
@@ -152,6 +153,10 @@ void setup() {
     Serial.printf("WiFi credentials loaded: SSID='%s', Password length=%d\n", appConfig->wifiSSID,
                   strlen(appConfig->wifiPassword));
     wifi.connect();
+
+    if (wifi.isConnected()) {
+      OtaUpdater::checkForUpdate();
+    }
   }
 
   int refreshSeconds = displayCurrentScreen(wifi.isConnected());
