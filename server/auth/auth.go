@@ -6,36 +6,46 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/Gauthamraju31/esp32-spectra-e6/server/config"
 )
 
 // session represents an authenticated user session.
 type session struct {
 	token     string
+	username  string
+	role      string
 	expiresAt time.Time
 }
 
 // Manager handles password-based authentication with session cookies.
 type Manager struct {
-	password string
+	users    []config.User
 	sessions map[string]*session
 	mu       sync.RWMutex
 }
 
-// NewManager creates a new auth manager with the given password.
-func NewManager(password string) *Manager {
+// NewManager creates a new auth manager with the given users list.
+func NewManager(users []config.User) *Manager {
 	return &Manager{
-		password: password,
+		users:    users,
 		sessions: make(map[string]*session),
 	}
 }
 
-// CheckPassword validates the provided password.
-func (m *Manager) CheckPassword(pw string) bool {
-	return pw == m.password
+// CheckCredentials validates the provided username and password and returns the user if matched.
+func (m *Manager) CheckCredentials(username, pw string) (*config.User, bool) {
+	for _, u := range m.users {
+		if u.Username == username && u.Password == pw {
+			return &u, true
+		}
+	}
+	// Fallback to check if they typed the password in username or something? No, keep it strict.
+	return nil, false
 }
 
 // CreateSession generates a new session token and stores it.
-func (m *Manager) CreateSession() (string, error) {
+func (m *Manager) CreateSession(user *config.User) (string, error) {
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
 		return "", err
@@ -45,11 +55,31 @@ func (m *Manager) CreateSession() (string, error) {
 	m.mu.Lock()
 	m.sessions[tokenStr] = &session{
 		token:     tokenStr,
+		username:  user.Username,
+		role:      user.Role,
 		expiresAt: time.Now().Add(24 * time.Hour),
 	}
 	m.mu.Unlock()
 
 	return tokenStr, nil
+}
+
+// GetSessionRole returns the role of the user associated with the token.
+func (m *Manager) GetSessionRole(token string) string {
+	m.mu.RLock()
+	sess, ok := m.sessions[token]
+	m.mu.RUnlock()
+
+	if !ok {
+		return ""
+	}
+	if time.Now().After(sess.expiresAt) {
+		m.mu.Lock()
+		delete(m.sessions, token)
+		m.mu.Unlock()
+		return ""
+	}
+	return sess.role
 }
 
 // ValidateSession checks if a session token is valid and not expired.

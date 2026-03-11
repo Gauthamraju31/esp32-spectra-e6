@@ -59,6 +59,7 @@ type loginData struct {
 }
 
 type promptData struct {
+	IsAdmin           bool
 	ProviderName      string
 	Remaining         int
 	Limit             int
@@ -90,15 +91,18 @@ func (h *PromptHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// POST — validate password
+	// POST — validate credentials
+	username := r.FormValue("username")
 	password := r.FormValue("password")
-	if !h.auth.CheckPassword(password) {
+
+	user, ok := h.auth.CheckCredentials(username, password)
+	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
-		h.templates.ExecuteTemplate(w, "login", loginData{Error: "Invalid password"})
+		h.templates.ExecuteTemplate(w, "login", loginData{Error: "Invalid username or password"})
 		return
 	}
 
-	token, err := h.auth.CreateSession()
+	token, err := h.auth.CreateSession(user)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -129,6 +133,7 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := promptData{
+		IsAdmin:          h.auth.GetSessionRole(auth.GetSessionToken(r)) == "admin",
 		Remaining:        h.limiter.Remaining(),
 		Limit:            h.limiter.Limit(),
 		HasImage:         h.store.HasImage(),
@@ -164,6 +169,8 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 				data.Error = "Invalid firmware file. Must be a valid ESP32 binary."
 			case "save_error":
 				data.Error = "Failed to securely save the firmware to storage."
+			case "unauthorized":
+				data.Error = "You do not have permission to perform this action."
 			default:
 				data.Error = "Failed to upload firmware."
 			}
@@ -269,6 +276,12 @@ func (h *PromptHandler) HandlePrompt(w http.ResponseWriter, r *http.Request) {
 func (h *PromptHandler) HandleFirmwareUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/prompt", http.StatusSeeOther)
+		return
+	}
+
+	token := auth.GetSessionToken(r)
+	if h.auth.GetSessionRole(token) != "admin" {
+		http.Redirect(w, r, "/prompt?error=unauthorized", http.StatusSeeOther)
 		return
 	}
 
@@ -469,8 +482,12 @@ const loginTemplate = `{{define "login"}}<!DOCTYPE html>
             {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
             <form method="POST" action="/login">
                 <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" placeholder="Enter username" required autofocus>
+                </div>
+                <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="Enter access password" required autofocus>
+                    <input type="password" id="password" name="password" placeholder="Enter password" required>
                 </div>
                 <button type="submit" class="btn">Sign In</button>
             </form>
@@ -920,6 +937,7 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
             </form>
         </div>
 
+        {{if .IsAdmin}}
         <div class="card">
             <div class="card-title">OTA Firmware Update</div>
             <form method="POST" action="/firmware/upload" enctype="multipart/form-data">
@@ -939,6 +957,7 @@ const promptTemplate = `{{define "prompt"}}<!DOCTYPE html>
             </div>
             {{end}}
         </div>
+        {{end}}
 
         <div class="card">
             <div class="card-title">Current Display Image</div>

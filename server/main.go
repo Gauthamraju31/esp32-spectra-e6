@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// Initialize components
-	authMgr := auth.NewManager(cfg.Password)
+	authMgr := auth.NewManager(cfg.Users)
 	limiterFile := fmt.Sprintf("%s/ratelimit.json", cfg.DataDir)
 	limiter := ratelimit.NewLimiter(cfg.DailyRateLimit, limiterFile)
 	ditherer := dither.NewDitherer(cfg.DitherServiceURL, cfg.DitherMode, cfg.DisplayWidth, cfg.DisplayHeight)

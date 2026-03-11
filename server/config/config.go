@@ -1,15 +1,25 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 )
 
+// User represents a user of the system.
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+}
+
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
 	Port             int
-	Password         string
+	Password         string // Deprecated: use Users instead
+	UsersJSON        string
+	Users            []User
 	ImageProvider    string
 	OpenAIAPIKey     string
 	NanoBananaAPIKey string
@@ -34,6 +44,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:             getEnvInt("PORT", 8080),
 		Password:         getEnv("PASSWORD", ""),
+		UsersJSON:        getEnv("USERS_JSON", ""),
 		ImageProvider:    getEnv("IMAGE_PROVIDER", "stub"),
 		OpenAIAPIKey:     getEnv("OPENAI_API_KEY", ""),
 		NanoBananaAPIKey: getEnv("NANOBANANA_API_KEY", ""),
@@ -53,8 +64,19 @@ func Load() (*Config, error) {
 		RunwareModelID:   getEnv("RUNWARE_MODEL_ID", "runware:101@1"),
 	}
 
-	if cfg.Password == "" {
-		return nil, fmt.Errorf("PASSWORD environment variable is required")
+	if cfg.UsersJSON != "" {
+		if err := json.Unmarshal([]byte(cfg.UsersJSON), &cfg.Users); err != nil {
+			return nil, fmt.Errorf("failed to parse USERS_JSON: %v", err)
+		}
+	} else if cfg.Password != "" {
+		// Fallback for single password mode
+		cfg.Users = []User{{
+			Username: "admin",
+			Password: cfg.Password,
+			Role:     "admin",
+		}}
+	} else {
+		return nil, fmt.Errorf("PASSWORD or USERS_JSON environment variable is required")
 	}
 
 	return cfg, nil
