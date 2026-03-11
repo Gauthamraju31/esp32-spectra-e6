@@ -52,18 +52,25 @@ jobs:
         echo "tag=v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
         
     - name: Build firmware
-      run: pio run --environment lilygo-t5-v213
+      run: |
+        pio run --environment lilygo-t7-s3
+        pio run --environment seeed_xiao_esp32s3
       
     - name: Build filesystem image
-      run: pio run --target buildfs --environment lilygo-t5-v213
+      run: |
+        pio run --target buildfs --environment lilygo-t7-s3
+        pio run --target buildfs --environment seeed_xiao_esp32s3
       
     - name: Prepare artifacts
       run: |
         mkdir -p release-artifacts
-        # Copy firmware binary
-        cp .pio/build/lilygo-t5-v213/firmware.bin release-artifacts/lilygo-t5-firmware-${{ steps.build_info.outputs.short_sha }}.bin
-        # Copy filesystem image
-        cp .pio/build/lilygo-t5-v213/spiffs.bin release-artifacts/filesystem.bin
+        # Copy firmware binaries
+        cp .pio/build/lilygo-t7-s3/firmware.bin release-artifacts/lilygo-t7-s3-firmware-${{ steps.build_info.outputs.short_sha }}.bin
+        cp .pio/build/seeed_xiao_esp32s3/firmware.bin release-artifacts/seeed_xiao_esp32s3-firmware-${{ steps.build_info.outputs.short_sha }}.bin
+        
+        # Copy filesystem images
+        cp .pio/build/lilygo-t7-s3/spiffs.bin release-artifacts/lilygo-t7-s3-filesystem.bin
+        cp .pio/build/seeed_xiao_esp32s3/spiffs.bin release-artifacts/seeed_xiao_esp32s3-filesystem.bin
         
         # Create checksums
         cd release-artifacts
@@ -73,7 +80,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.build_info.outputs.tag }}
-        name: "LilyGO T5 Weather Station - ${{ steps.build_info.outputs.short_sha }}"
+        name: "Spectra E6 Weather Station - ${{ steps.build_info.outputs.short_sha }}"
         body: |
           ## 🚀 Release
           

@@ -18,7 +18,7 @@ import (
 
 // S3Store manages images in an S3-compatible object store (like Cloudflare R2).
 type S3Store struct {
-	client     *s3.Client
+	client            *s3.Client
 	bucket            string
 	etag              string
 	updatedAt         time.Time
@@ -58,7 +58,7 @@ func NewS3Store(endpoint, accessKey, secretKey, bucket string) (*S3Store, error)
 
 func (s *S3Store) Save(data []byte) error {
 	ctx := context.TODO()
-	
+
 	hash := sha256.Sum256(data)
 	computedETag := `"` + hex.EncodeToString(hash[:8]) + `"`
 
@@ -125,14 +125,14 @@ func (s *S3Store) LoadOriginal() ([]byte, string, error) {
 			Bucket: aws.String(s.bucket),
 			Key:    aws.String(key),
 		})
-		
+
 		if err == nil {
 			defer resp.Body.Close()
 			data, readErr := io.ReadAll(resp.Body)
 			if readErr != nil {
 				return nil, "", fmt.Errorf("failed to read S3 object body: %w", readErr)
 			}
-			
+
 			contentType := "image/png"
 			if ext == ".jpg" {
 				contentType = "image/jpeg"
@@ -163,7 +163,7 @@ func (s *S3Store) UpdatedAt() time.Time {
 
 func (s *S3Store) SaveFirmware(data []byte) error {
 	ctx := context.TODO()
-	
+
 	hash := sha256.Sum256(data)
 	computedETag := `"` + hex.EncodeToString(hash[:8]) + `"`
 
@@ -225,8 +225,7 @@ func (s *S3Store) refreshMetadata(ctx context.Context) {
 	})
 	if err == nil {
 		s.mu.Lock()
-		defer s.mu.Unlock()
-		
+
 		// If S3 returns an ETag, we could use it, but since we compute strong pseudo-ETags based on sha256,
 		// and S3 ETags are sometimes MD5s or complicated multipart hashes, it's safer to just
 		// pull the object and hash it if we really cared. For now, if the object exists,
@@ -236,13 +235,14 @@ func (s *S3Store) refreshMetadata(ctx context.Context) {
 		} else {
 			s.updatedAt = time.Now()
 		}
-		
+
 		// We could use resp.ETag directly if we want to rely on the S3 provider.
 		if resp.ETag != nil {
 			s.etag = *resp.ETag
 		} else {
 			s.etag = `"s3-cached"`
 		}
+		s.mu.Unlock()
 	}
 
 	respFirmware, errFirmware := s.client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -251,7 +251,6 @@ func (s *S3Store) refreshMetadata(ctx context.Context) {
 	})
 	if errFirmware == nil {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		if respFirmware.LastModified != nil {
 			s.firmwareUpdatedAt = *respFirmware.LastModified
 		} else {
@@ -262,5 +261,6 @@ func (s *S3Store) refreshMetadata(ctx context.Context) {
 		} else {
 			s.firmwareEtag = `"s3-cached"`
 		}
+		s.mu.Unlock()
 	}
 }
